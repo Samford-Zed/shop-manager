@@ -1,0 +1,21 @@
+{
+  "name": "login_ui",
+  "version": "1.0.0",
+  "description": "Backend for login UI",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.4",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.0",
+    "pg": "^8.11.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "946501209629",
+    "project_id": "todo-flutter-e0f70",
+    "storage_bucket": "todo-flutter-e0f70.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:946501209629:android:af1d872b65d8753df680f4",
+        "android_client_info": {
+          "package_name": "com.example.shopstack"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDJJUoHPJ39q0EnMciLl4QJelXrwpnCb7U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
