@@ -14,36 +14,47 @@ class RegisterPage extends StatefulWidget {
 }
 
 class _RegisterPageState extends State<RegisterPage> {
-  final TextEditingController usernameController = TextEditingController();
+  final TextEditingController nameController = TextEditingController();
+  final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
 
   final ValueNotifier<bool> _obscure = ValueNotifier<bool>(true);
 
   final String baseUrl = ApiConfig.baseUrl;
 
+  bool _isSubmitting = false;
+
   Future<void> register() async {
-    final username = usernameController.text.trim();
+    if (_isSubmitting) return;
+    _isSubmitting = true;
+
+    final displayName = nameController.text.trim();
+    final email = emailController.text.trim();
     final password = passwordController.text.trim();
 
-    if (username.isEmpty || password.isEmpty) {
+    if (displayName.isEmpty || email.isEmpty || password.isEmpty) {
+      _isSubmitting = false;
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter username and password')),
+        const SnackBar(content: Text('Please enter name, email and password')),
       );
       return;
     }
 
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/register'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'username': username,
-          'password': password,
-          // role removed from client-side registration to prevent self-assigning roles
-        }),
-      );
+    final uri = Uri.parse('$baseUrl/register');
+    debugPrint('Register: baseUrl=$baseUrl uri=$uri');
 
-      if (!mounted) return;
+    try {
+      final response = await http
+          .post(
+            uri,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'name': displayName, 'email': email, 'password': password}),
+          )
+          .timeout(const Duration(seconds: 10));
+
+      if (!mounted) { _isSubmitting = false; return; }
+      debugPrint('Register: status=${response.statusCode} body=${response.body}');
 
       if (response.statusCode == 201 || response.statusCode == 200) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -57,13 +68,17 @@ class _RegisterPageState extends State<RegisterPage> {
       } else {
         final data = jsonDecode(response.body);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(data['message'] ?? 'Registration failed')),
+          SnackBar(content: Text('Registration failed (${response.statusCode}): ${data['message'] ?? response.body}')),
         );
       }
-    } catch (e) {
+    } on Exception catch (e) {
+      if (!mounted) { _isSubmitting = false; return; }
+      debugPrint('Register: exception=$e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Server error: $e')),
       );
+    } finally {
+      _isSubmitting = false;
     }
   }
 
@@ -77,7 +92,8 @@ class _RegisterPageState extends State<RegisterPage> {
 
   @override
   void dispose() {
-    usernameController.dispose();
+    nameController.dispose();
+    emailController.dispose();
     passwordController.dispose();
     _obscure.dispose();
     super.dispose();
@@ -187,14 +203,27 @@ class _RegisterPageState extends State<RegisterPage> {
 
                           const SizedBox(height: 24),
 
-                          /// Username
+                          /// Name
                           TextField(
-                            controller: usernameController,
+                            controller: nameController,
                             decoration: const InputDecoration(
-                              labelText: 'Username',
+                              labelText: 'Name',
                               prefixIcon: Icon(Icons.person_outline),
                               filled: true,
                             ),
+                          ),
+
+                          const SizedBox(height: 14),
+
+                          /// Email
+                          TextField(
+                            controller: emailController,
+                            decoration: const InputDecoration(
+                              labelText: 'Email',
+                              prefixIcon: Icon(Icons.email_outlined),
+                              filled: true,
+                            ),
+                            keyboardType: TextInputType.emailAddress,
                           ),
 
                           const SizedBox(height: 14),

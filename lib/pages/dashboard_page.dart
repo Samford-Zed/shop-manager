@@ -420,6 +420,22 @@ class _DashboardPageState extends State<DashboardPage> {
 
   /* ================= UI (UNCHANGED) ================= */
 
+  String _nameFromToken(String token, String fallback) {
+    try {
+      final parts = token.split('.');
+      if (parts.length != 3) return fallback;
+      String normalized = parts[1].replaceAll('-', '+').replaceAll('_', '/');
+      while (normalized.length % 4 != 0) {
+        normalized += '=';
+      }
+      final payload = utf8.decode(base64.decode(normalized));
+      final map = jsonDecode(payload) as Map<String, dynamic>;
+      final name = (map['name'] as String?)?.trim();
+      if (name != null && name.isNotEmpty) return name;
+    } catch (_) {}
+    return fallback;
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -428,6 +444,7 @@ class _DashboardPageState extends State<DashboardPage> {
       final matchText = q.isEmpty || p.name.toLowerCase().contains(q);
       return matchText;
     }).toList();
+    final greetingName = _nameFromToken(widget.token, widget.username);
 
     return Scaffold(
       appBar: AppBar(
@@ -449,7 +466,7 @@ class _DashboardPageState extends State<DashboardPage> {
               const SizedBox(width: 8),
               Flexible(
                 child: Text(
-                  'Hello, ${widget.username}',
+                  'Hello, $greetingName',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black87),
@@ -814,7 +831,7 @@ class _ActivityItem {
     actorName: (j['actor_name'] as String?) ?? 'Unknown',
     actorRole: (j['actor_role'] as String?) ?? '',
     action: j['action'] as String,
-    productName: j['product_name'] as String?,
+    productName: (j['product_name'] as String?) ?? ((j['details'] as Map?)?['name'] as String?),
     details: (j['details'] as Map?)?.cast<String, dynamic>() ?? {},
     createdAt: j['created_at'] as String,
   );
@@ -878,8 +895,9 @@ class _ActivityList extends StatelessWidget {
       separatorBuilder: (_, __) => const Divider(height: 1),
       itemBuilder: (_, i) {
         final it = items[i];
-        final subtitle = it.productName != null
-            ? '${it.label} • ${it.productName}'
+        final displayName = it.productName ?? (it.details['name'] as String?);
+        final subtitle = displayName != null
+            ? '${it.label} • $displayName'
             : it.label;
         return ListTile(
           leading: CircleAvatar(

@@ -37,6 +37,7 @@ app.use(express.json());
 ensureActivityLogs();
 
 const PORT = process.env.PORT || 5000;
+const HOST = process.env.HOST || '0.0.0.0';
 
 // Preflight: ensure DB configuration present via db.js
 if (!process.env.DATABASE_URL && !(process.env.PGUSER && process.env.PGHOST && process.env.PGDATABASE && process.env.PGPASSWORD && process.env.PGPORT)) {
@@ -56,7 +57,7 @@ const authMiddleware = (req, res, next) => {
 
   const token = authHeader.split(' ')[1];
   try {
-    req.user = jwt.verify(token, JWT_SECRET); // {id, username, role}
+    req.user = jwt.verify(token, JWT_SECRET); // {id, email, role}
     next();
   } catch {
     res.status(401).json({ message: 'Invalid token' });
@@ -81,22 +82,18 @@ const ownerOrCashier = (req, res, next) => {
 
 app.post('/register', async (req, res) => {
   try {
-    const { username, password } = req.body;
-    if (!username || !password)
-      return res.status(400).json({ message: 'username and password required' });
+    const { email, password, name } = req.body;
+    if (!email || !password)
+      return res.status(400).json({ message: 'email and password required' });
 
-    const exists = await pool.query(
-      'SELECT id FROM users WHERE username=$1',
-      [username]
-    );
-    if (exists.rows.length)
-      return res.status(400).json({ message: 'Username exists' });
+    const exists = await pool.query('SELECT id FROM users WHERE email=$1', [email]);
+    if (exists.rows.length) return res.status(400).json({ message: 'Email exists' });
 
+    const friendly = (name || '').trim() || email.split('@')[0];
     const hashed = await bcrypt.hash(password, 10);
-    // Public registration always creates an OWNER. Cashiers must be created by OWNER via /cashiers
     await pool.query(
-      "INSERT INTO users (username, password, role) VALUES ($1,$2,'OWNER')",
-      [username, hashed]
+      "INSERT INTO users (email, password, role, name) VALUES ($1,$2,'OWNER',$3)",
+      [email, hashed, friendly]
     );
     res.status(201).json({ message: 'Owner registered' });
   } catch (e) {
@@ -107,26 +104,25 @@ app.post('/register', async (req, res) => {
 
 app.post('/login', async (req, res) => {
   try {
-    const { username, password } = req.body;
-
+    const { email, password } = req.body;
+    // Select a friendly_name coalesced from name or email local part
     const result = await pool.query(
-      'SELECT * FROM users WHERE username=$1',
-      [username]
+      `SELECT id, email, password, role, COALESCE(name, split_part(email,'@',1)) AS friendly_name
+       FROM users WHERE email=$1`,
+      [email]
     );
-    if (!result.rows.length)
-      return res.status(400).json({ message: 'User not found' });
-
+    if (!result.rows.length) return res.status(400).json({ message: 'User not found' });
     const user = result.rows[0];
     const ok = await bcrypt.compare(password, user.password);
     if (!ok) return res.status(400).json({ message: 'Invalid password' });
 
     const token = jwt.sign(
-      { id: user.id, username: user.username, role: user.role },
+      { id: user.id, email: user.email, role: user.role, name: user.friendly_name },
       JWT_SECRET,
       { expiresIn: '1h' }
     );
 
-    res.json({ token, role: user.role });
+    res.json({ token, role: user.role, name: user.friendly_name });
   } catch (e) {
     console.error(e.message);
     res.status(500).json({ message: 'Server error' });
@@ -363,7 +359,8 @@ app.get('/sales', authMiddleware, ownerOrCashier, async (req, res) => {
              s.product_id,
              COALESCE(p.name,'') AS product_name,
              s.cashier_id,
-             COALESCE(u.username,'') AS cashier_name,
+             COALESCE(u.email,'') AS cashier_email,
+             COALESCE(u.name, split_part(u.email,'@',1)) AS cashier_name,
              s.quantity,
              s.unit_price::numeric AS unit_price,
              s.total_price::numeric AS total_price,
@@ -442,7 +439,7 @@ app.get('/reports/heatmap', authMiddleware, ownerOnly, async (req, res) => {
 app.get('/cashiers', authMiddleware, ownerOnly, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, username, role, created_at
+      `SELECT id, email, name, role, created_at
        FROM users
        WHERE role = 'CASHIER'
        ORDER BY created_at DESC`
@@ -457,23 +454,19 @@ app.get('/cashiers', authMiddleware, ownerOnly, async (req, res) => {
 // Create cashier account (OWNER)
 app.post('/cashiers', authMiddleware, ownerOnly, async (req, res) => {
   try {
-    const { username, password } = req.body;
-    if (!username || !password) {
-      return res.status(400).json({ message: 'username and password required' });
+    const { email, password, name } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ message: 'email and password required' });
     }
-
-    const exists = await pool.query('SELECT id FROM users WHERE username=$1', [username]);
-    if (exists.rows.length) {
-      return res.status(400).json({ message: 'Username exists' });
-    }
-
+    const exists = await pool.query('SELECT id FROM users WHERE email=$1', [email]);
+    if (exists.rows.length) return res.status(400).json({ message: 'Email exists' });
+    const friendly = (name || '').trim() || email.split('@')[0];
     const hashed = await bcrypt.hash(password, 10);
     await pool.query(
-      `INSERT INTO users (username, password, role)
-       VALUES ($1,$2,'CASHIER')`,
-      [username, hashed]
+      `INSERT INTO users (email, password, role, name)
+       VALUES ($1,$2,'CASHIER',$3)`,
+      [email, hashed, friendly]
     );
-
     return res.status(201).json({ message: 'Cashier created' });
   } catch (e) {
     console.error('POST /cashiers error:', e.message);
@@ -487,7 +480,10 @@ app.get('/activity', authMiddleware, ownerOnly, async (req, res) => {
     const { limit } = req.query;
     const n = Math.min(parseInt(limit || '200', 10), 500);
     const result = await pool.query(
-      `SELECT a.id, a.actor_id, u.username AS actor_name, a.actor_role, a.action, a.product_id,
+      `SELECT a.id, a.actor_id,
+              u.email AS actor_email,
+              COALESCE(u.name, split_part(u.email,'@',1)) AS actor_name,
+              a.actor_role, a.action, a.product_id,
               p.name AS product_name, a.details, a.created_at
        FROM activity_logs a
        LEFT JOIN users u ON u.id = a.actor_id
@@ -508,6 +504,6 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-app.listen(PORT, () =>
-  console.log(`🚀 Shop server running on port ${PORT}`)
+app.listen(PORT, HOST, () =>
+  console.log(`🚀 Shop server running on http://${HOST}:${PORT}`)
 );

@@ -16,54 +16,69 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final TextEditingController usernameController = TextEditingController();
+  final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
   final ValueNotifier<bool> _obscure = ValueNotifier<bool>(true);
   final String baseUrl = ApiConfig.baseUrl;
+  bool _isSubmitting = false;
 
   Future<void> login() async {
-    final username = usernameController.text.trim();
+    if (_isSubmitting) return;
+    _isSubmitting = true;
+
+    final email = emailController.text.trim();
     final password = passwordController.text.trim();
 
-    if (username.isEmpty || password.isEmpty) {
+    if (email.isEmpty || password.isEmpty) {
+      _isSubmitting = false;
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter username and password')),
+        const SnackBar(content: Text('Please enter email and password')),
       );
       return;
     }
 
+    final uri = Uri.parse('$baseUrl/login');
+    debugPrint('Login: baseUrl=$baseUrl uri=$uri');
+
     try {
-      final res = await http.post(
-        Uri.parse('$baseUrl/login'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'username': username,
-          'password': password,
-        }),
-      );
+      final res = await http
+          .post(
+            uri,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'email': email, 'password': password}),
+          )
+          .timeout(const Duration(seconds: 10));
+
+      if (!mounted) { _isSubmitting = false; return; }
+      debugPrint('Login: status=${res.statusCode} body=${res.body}');
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
         final token = data['token'] as String;
-        final role = (data['role'] as String?) ?? 'CASHIER'; // safe fallback
-
+        final role = (data['role'] as String?) ?? 'CASHIER';
+        final name = (data['name'] as String?) ?? email;
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
             builder: (_) => role == 'OWNER'
-                ? MainDashboardPage(username: username, token: token, role: role)
-                : ProductPage(username: username, token: token, role: role),
+                ? MainDashboardPage(username: name, token: token, role: role)
+                : ProductPage(username: name, token: token, role: role),
           ),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Login failed: ${res.body}')),
+          SnackBar(content: Text('Login failed (${res.statusCode}): ${res.body}')),
         );
       }
-    } catch (e) {
+    } on Exception catch (e) {
+      if (!mounted) { _isSubmitting = false; return; }
+      debugPrint('Login: exception=$e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Login error: $e')),
       );
+    } finally {
+      _isSubmitting = false;
     }
   }
 
@@ -84,7 +99,7 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   void dispose() {
-    usernameController.dispose();
+    emailController.dispose();
     passwordController.dispose();
     _obscure.dispose();
     super.dispose();
@@ -195,19 +210,20 @@ class _LoginPageState extends State<LoginPage> {
                           ),
                           const SizedBox(height: 24),
 
-                          // Username
+                          // Email field (replaces Username)
                           TextField(
-                            controller: usernameController,
+                            controller: emailController,
                             textInputAction: TextInputAction.next,
                             decoration: InputDecoration(
-                              labelText: 'Username',
-                              prefixIcon: const Icon(Icons.person_outline),
+                              labelText: 'Email',
+                              prefixIcon: const Icon(Icons.email_outlined),
                               filled: true,
                               fillColor: const Color(0xFFF6F8FC),
                               border: OutlineInputBorder(borderRadius: BorderRadius.circular(18)),
                               enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(18)),
                               focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: BorderSide(color: scheme.primary, width: 1.6)),
                             ),
+                            keyboardType: TextInputType.emailAddress,
                           ),
                           const SizedBox(height: 14),
 
@@ -266,7 +282,7 @@ class _LoginPageState extends State<LoginPage> {
                                 ],
                               ),
                               child: ElevatedButton(
-                                onPressed: login,
+                                onPressed: _isSubmitting ? null : login,
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.transparent,
                                   shadowColor: Colors.transparent,

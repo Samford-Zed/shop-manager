@@ -23,10 +23,28 @@ class MainDashboardPage extends StatefulWidget {
 class _MainDashboardPageState extends State<MainDashboardPage> {
   int _index = 0;
 
+  String _nameFromToken(String token, String fallback) {
+    try {
+      final parts = token.split('.');
+      if (parts.length != 3) return fallback;
+      String normalized = parts[1].replaceAll('-', '+').replaceAll('_', '/');
+      // Pad base64 if needed
+      while (normalized.length % 4 != 0) {
+        normalized += '=';
+      }
+      final payload = utf8.decode(base64.decode(normalized));
+      final map = jsonDecode(payload) as Map<String, dynamic>;
+      final name = (map['name'] as String?)?.trim();
+      if (name != null && name.isNotEmpty) return name;
+    } catch (_) {}
+    return fallback;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final greetingName = _nameFromToken(widget.token, widget.username);
     final views = [
-      HomeView(username: widget.username, token: widget.token),
+      HomeView(username: greetingName, token: widget.token),
       ItemsView(token: widget.token),
       TransactionsView(token: widget.token, role: widget.role), // pass role
       SettingsView(token: widget.token, role: widget.role),
@@ -52,7 +70,7 @@ class _MainDashboardPageState extends State<MainDashboardPage> {
               const SizedBox(width: 8),
               Flexible(
                 child: Text(
-                  'Hello, ${widget.username}',
+                  'Hello, $greetingName',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black87),
@@ -245,10 +263,10 @@ class _ActivityItem {
   });
   factory _ActivityItem.fromJson(Map<String, dynamic> j) => _ActivityItem(
     id: j['id'] as int,
-    actorName: (j['actor_name'] as String?) ?? 'Unknown',
+    actorName: (j['actor_name'] as String?) ?? (j['actor_email'] as String?) ?? 'Unknown',
     actorRole: (j['actor_role'] as String?) ?? '',
     action: j['action'] as String,
-    productName: j['product_name'] as String?,
+    productName: (j['product_name'] as String?) ?? ((j['details'] as Map?)?['name'] as String?),
     details: (j['details'] as Map?)?.cast<String, dynamic>() ?? {},
     createdAt: j['created_at'] as String,
   );
@@ -315,8 +333,9 @@ class _ActivityList extends StatelessWidget {
       separatorBuilder: (_, __) => const Divider(height: 1),
       itemBuilder: (_, i) {
         final it = items[i];
-        final subtitle = it.productName != null
-            ? '${it.label} • ${it.productName}'
+        final displayName = it.productName ?? (it.details['name'] as String?);
+        final subtitle = displayName != null
+            ? '${it.label} • $displayName'
             : it.label;
         return ListTile(
           leading: CircleAvatar(
@@ -765,7 +784,7 @@ class _Sale {
     productId: _toInt(j['product_id']),
     productName: (j['product_name'] ?? '') as String,
     cashierId: _toInt(j['cashier_id']),
-    cashierName: j['cashier_name'] as String?,
+    cashierName: (j['cashier_name'] as String?) ?? (j['cashier_email'] as String?),
     quantity: _toInt(j['quantity']),
     unitPrice: _toDouble(j['unit_price']),
     totalPrice: _toDouble(j['total_price']),
@@ -783,6 +802,7 @@ class SettingsView extends StatefulWidget {
 
 class _SettingsViewState extends State<SettingsView> {
   final String baseUrl = ApiConfig.baseUrl;
+  final TextEditingController _nameCtrl = TextEditingController();
   final TextEditingController _userCtrl = TextEditingController();
   final TextEditingController _passCtrl = TextEditingController();
   List<Map<String, dynamic>> cashiers = [];
@@ -810,7 +830,7 @@ class _SettingsViewState extends State<SettingsView> {
     if (mounted) setState(() => loading = false);
   }
 
-  void _openAddCashierDialog() {
+    void _openAddCashierDialog() {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -819,12 +839,22 @@ class _SettingsViewState extends State<SettingsView> {
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
-              controller: _userCtrl,
+              controller: _nameCtrl,
               decoration: const InputDecoration(
-                labelText: 'Username',
+                labelText: 'Name',
                 prefixIcon: Icon(Icons.person_outline),
                 filled: true,
               ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _userCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Email',
+                prefixIcon: Icon(Icons.email_outlined),
+                filled: true,
+              ),
+              keyboardType: TextInputType.emailAddress,
             ),
             const SizedBox(height: 12),
             TextField(
@@ -842,11 +872,12 @@ class _SettingsViewState extends State<SettingsView> {
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () async {
-              final username = _userCtrl.text.trim();
+              final displayName = _nameCtrl.text.trim();
+              final email = _userCtrl.text.trim();
               final password = _passCtrl.text.trim();
-              if (username.isEmpty || password.isEmpty) {
+              if (displayName.isEmpty || email.isEmpty || password.isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please enter both username and password')),
+                  const SnackBar(content: Text('Please enter name, email and password')),
                 );
                 return;
               }
@@ -857,9 +888,10 @@ class _SettingsViewState extends State<SettingsView> {
                     'Authorization': 'Bearer ${widget.token}',
                     'Content-Type': 'application/json',
                   },
-                  body: jsonEncode({'username': username, 'password': password}),
+                  body: jsonEncode({'name': displayName, 'email': email, 'password': password}),
                 );
                 if (res.statusCode == 201) {
+                  _nameCtrl.clear();
                   _userCtrl.clear();
                   _passCtrl.clear();
                   Navigator.pop(context);
@@ -884,14 +916,15 @@ class _SettingsViewState extends State<SettingsView> {
         ],
       ),
     );
-  }
+    }
 
-  @override
-  void dispose() {
+    @override
+    void dispose() {
+    _nameCtrl.dispose();
     _userCtrl.dispose();
     _passCtrl.dispose();
     super.dispose();
-  }
+    }
 
   @override
   Widget build(BuildContext context) {
@@ -954,8 +987,8 @@ class _SettingsViewState extends State<SettingsView> {
                                     return Card(
                                       child: ListTile(
                                         leading: const Icon(Icons.person_outline),
-                                        title: Text(c['username'] as String),
-                                        subtitle: Text('Created at: ${_formatDateTime((c['created_at'] ?? '') as String)}'),
+                                        title: Text((c['name'] ?? '') as String),
+                                        subtitle: Text('Email: ${(c['email'] ?? '') as String}\nCreated at: ${_formatDateTime((c['created_at'] ?? '') as String)}'),
                                         trailing: isOwner ? IconButton(
                                           icon: const Icon(Icons.refresh),
                                           onPressed: _fetchCashiers,
@@ -1000,7 +1033,7 @@ class _SummaryRow extends StatelessWidget {
       {'icon': Icons.inventory_2, 'label': 'Total Products', 'value': '${s['totalProducts'] ?? 0}', 'color': Colors.blue},
       {'icon': Icons.badge, 'label': 'Total Cashiers', 'value': '${s['totalCashiers'] ?? 0}', 'color': Colors.purple},
       {'icon': Icons.receipt_long, 'label': 'Orders', 'value': '${s['orders'] ?? 0}', 'color': Colors.teal},
-      {'icon': Icons.attach_money, 'label': 'Revenue', 'value': '\$${money((s['revenue'] ?? 0) as num)}', 'color': Colors.green},
+      {'icon': Icons.attach_money, 'label': 'Revenue', 'value': 'ETB ${money((s['revenue'] ?? 0) as num)}', 'color': Colors.green},
       {'icon': Icons.shopping_cart_checkout, 'label': 'Items Sold', 'value': '${s['items'] ?? 0}', 'color': Colors.orange},
     ];
 
