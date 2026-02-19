@@ -26,6 +26,8 @@ class _ReportPageState extends State<ReportPage> {
   final List<Product> products = [];
   Map<int, int> totalSoldByProduct = {}; // productId -> total sold (optional)
   bool loading = true;
+  bool summaryLoading = true;
+  Map<String, dynamic> periodSummary = const {};
 
   bool get isOwner => widget.role == 'OWNER';
 
@@ -39,6 +41,7 @@ class _ReportPageState extends State<ReportPage> {
     await Future.wait([
       _fetchProducts(),
       _tryFetchProductSales(),
+      _fetchPeriodSummary(),
     ]);
     if (mounted) setState(() => loading = false);
   }
@@ -57,6 +60,28 @@ class _ReportPageState extends State<ReportPage> {
       }
     } catch (e) {
       debugPrint('report fetchProducts error: $e');
+    }
+  }
+
+  Future<void> _fetchPeriodSummary() async {
+    try {
+      final headers = {'Authorization': 'Bearer ${widget.token}'};
+      final weekReq = http.get(Uri.parse('$baseUrl/reports/summary?period=week'), headers: headers);
+      final monthReq = http.get(Uri.parse('$baseUrl/reports/summary?period=month'), headers: headers);
+      final yearReq = http.get(Uri.parse('$baseUrl/reports/summary?period=year'), headers: headers);
+      final res = await Future.wait([weekReq, monthReq, yearReq]);
+
+      if (res[0].statusCode == 200 && res[1].statusCode == 200 && res[2].statusCode == 200) {
+        periodSummary = {
+          'week': jsonDecode(res[0].body) as Map<String, dynamic>,
+          'month': jsonDecode(res[1].body) as Map<String, dynamic>,
+          'year': jsonDecode(res[2].body) as Map<String, dynamic>,
+        };
+      }
+    } catch (e) {
+      debugPrint('report period summary not available: $e');
+    } finally {
+      if (mounted) setState(() => summaryLoading = false);
     }
   }
 
@@ -100,15 +125,107 @@ class _ReportPageState extends State<ReportPage> {
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
-          : products.isEmpty
-              ? _EmptyReport(colorScheme: scheme)
-              : Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: _ReportGrid(
-                    products: products,
-                    totalSoldByProduct: totalSoldByProduct,
+          : Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  _PeriodSummary(summary: periodSummary, loading: summaryLoading),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: products.isEmpty
+                        ? _EmptyReport(colorScheme: scheme)
+                        : _ReportGrid(
+                            products: products,
+                            totalSoldByProduct: totalSoldByProduct,
+                          ),
                   ),
-                ),
+                ],
+              ),
+            ),
+    );
+  }
+}
+
+class _PeriodSummary extends StatelessWidget {
+  final Map<String, dynamic> summary;
+  final bool loading;
+  const _PeriodSummary({required this.summary, required this.loading});
+
+  String _money(num v) => v.toStringAsFixed(2);
+
+  Map<String, dynamic> _period(String key) {
+    final data = summary[key];
+    if (data is Map<String, dynamic>) return data;
+    return const {};
+  }
+
+  int _int(dynamic v) {
+    if (v == null) return 0;
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return 0;
+  }
+
+  num _num(dynamic v) {
+    if (v == null) return 0;
+    if (v is num) return v;
+    return 0;
+  }
+
+  Widget _kpiCard(BuildContext context, String title, String value) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: TextStyle(color: scheme.outline, fontSize: 12)),
+            const SizedBox(height: 6),
+            if (loading)
+              const SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else
+              Text(value, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final week = _period('week');
+    final month = _period('month');
+    final year = _period('year');
+
+    final cards = [
+      _kpiCard(context, 'Weekly Revenue', 'ETB ${_money(_num(week['revenue']))}'),
+      _kpiCard(context, 'Monthly Revenue', 'ETB ${_money(_num(month['revenue']))}'),
+      _kpiCard(context, 'Yearly Revenue', 'ETB ${_money(_num(year['revenue']))}'),
+      _kpiCard(context, 'Weekly Items Sold', '${_int(week['items'])}'),
+      _kpiCard(context, 'Monthly Items Sold', '${_int(month['items'])}'),
+      _kpiCard(context, 'Yearly Items Sold', '${_int(year['items'])}'),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final columns = width > 900 ? 3 : (width > 600 ? 2 : 1);
+        final cardWidth = (width - ((columns - 1) * 12)) / columns;
+        return Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            for (final card in cards) SizedBox(width: cardWidth, child: card),
+          ],
+        );
+      },
     );
   }
 }

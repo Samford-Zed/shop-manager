@@ -7,17 +7,9 @@ const kBrandOrange = Color(0xFFFF5722); // vivid orange-red (Deep Orange)
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // If you have async plugin initialization (e.g., Firebase), do it here.
-  // await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-
   // Small delay lets web plugins register their channel listeners before messages arrive.
   // This helps avoid "ChannelBuffers message discarded" logs on web hot restart.
   await Future.delayed(const Duration(milliseconds: 60));
-
-  // Ensure first frame callback registers listeners before building the app.
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    // You can perform additional setup here if needed.
-  });
 
   runApp(const MyApp());
 }

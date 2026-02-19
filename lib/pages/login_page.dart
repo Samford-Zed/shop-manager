@@ -1,3 +1,4 @@
+import 'dart:async' show TimeoutException;
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'dart:ui';
@@ -41,6 +42,37 @@ class _LoginPageState extends State<LoginPage> {
     final uri = Uri.parse('$baseUrl/login');
     debugPrint('Login: baseUrl=$baseUrl uri=$uri');
 
+    // Quick health check so we can surface reachability problems faster
+    try {
+      final healthUri = Uri.parse('$baseUrl/health');
+      final healthRes = await http.get(healthUri).timeout(const Duration(seconds: 3));
+      if (healthRes.statusCode != 200) {
+        if (!mounted) { _isSubmitting = false; return; }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Cannot reach server at $baseUrl (health ${healthRes.statusCode}).\nEnsure backend is running and accessible from this device.')),
+        );
+        _isSubmitting = false;
+        return;
+      }
+    } on TimeoutException catch (_) {
+      if (!mounted) { _isSubmitting = false; return; }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Server did not respond to health check at $baseUrl.\nMake sure the backend is running and reachable from this device.\nIf you run on an Android emulator, try using http://10.0.2.2:5000 or run with --dart-define=API_BASE_URL=http://10.0.2.2:5000'),
+        ),
+      );
+      _isSubmitting = false;
+      return;
+    } catch (e) {
+      if (!mounted) { _isSubmitting = false; return; }
+      debugPrint('Login: health check error=$e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not contact server at $baseUrl: $e')),
+      );
+      _isSubmitting = false;
+      return;
+    }
+
     try {
       final res = await http
           .post(
@@ -71,6 +103,11 @@ class _LoginPageState extends State<LoginPage> {
           SnackBar(content: Text('Login failed (${res.statusCode}): ${res.body}')),
         );
       }
+    } on TimeoutException catch (_) {
+      if (!mounted) { _isSubmitting = false; return; }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Login request timed out. Please try again.')),
+      );
     } on Exception catch (e) {
       if (!mounted) { _isSubmitting = false; return; }
       debugPrint('Login: exception=$e');

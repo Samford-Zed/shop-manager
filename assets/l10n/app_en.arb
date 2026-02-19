@@ -1,0 +1,14 @@
+{
+  "@@locale": "en",
+  "appTitle": "shopstack",
+  "welcomeTitle": "Welcome to Shop Management",
+  "welcomeSubtitle": "Manage products, record sales, and view reports—all in one place.",
+  "haveAccount": "I have an account",
+  "createAccount": "Create a new account",
+  "languageButton": "Language / ቋንቋ / Afaan",
+  "chooseLanguageTitle": "Choose language",
+  "featureProducts": "Products",
+  "featureSales": "Sales",
+  "featureReports": "Reports"
+}
+

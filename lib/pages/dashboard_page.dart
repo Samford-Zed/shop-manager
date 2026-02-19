@@ -19,6 +19,86 @@ class DashboardPage extends StatefulWidget {
   State<DashboardPage> createState() => _DashboardPageState();
 }
 
+class _PeriodKpiRow extends StatelessWidget {
+  final Map<String, dynamic> summary;
+  final bool loading;
+  const _PeriodKpiRow({required this.summary, required this.loading});
+
+  String _money(num v) => v.toStringAsFixed(2);
+
+  Map<String, dynamic> _period(String key) {
+    final data = summary[key];
+    if (data is Map<String, dynamic>) return data;
+    return const {};
+  }
+
+  int _int(dynamic v) {
+    if (v == null) return 0;
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return 0;
+  }
+
+  num _num(dynamic v) {
+    if (v == null) return 0;
+    if (v is num) return v;
+    return 0;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final week = _period('week');
+    final month = _period('month');
+    final year = _period('year');
+
+    final items = [
+      {'label': 'Weekly Revenue', 'value': 'ETB ${_money(_num(week['revenue']))}'},
+      {'label': 'Monthly Revenue', 'value': 'ETB ${_money(_num(month['revenue']))}'},
+      {'label': 'Yearly Revenue', 'value': 'ETB ${_money(_num(year['revenue']))}'},
+      {'label': 'Weekly Items Sold', 'value': '${_int(week['items'])}'},
+      {'label': 'Monthly Items Sold', 'value': '${_int(month['items'])}'},
+      {'label': 'Yearly Items Sold', 'value': '${_int(year['items'])}'},
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Revenue Summary',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 8),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final maxW = constraints.maxWidth;
+            const gap = 10.0;
+            final twoCols = maxW >= 500;
+            final itemW = twoCols ? (maxW - gap) / 2 : maxW;
+            const itemH = 64.0;
+
+            return Wrap(
+              spacing: gap,
+              runSpacing: gap,
+              children: items.map((it) {
+                return SizedBox(
+                  width: itemW,
+                  height: itemH,
+                  child: _StatPill(
+                    icon: Icons.insights,
+                    label: it['label'] as String,
+                    value: loading ? '...' : (it['value'] as String),
+                    color: Colors.indigo,
+                  ),
+                );
+              }).toList(),
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
 /* ================= EXTRA UI META ================= */
 
 class ProductMeta {
@@ -38,13 +118,15 @@ class _DashboardPageState extends State<DashboardPage> {
   String filter = 'all';
   final String baseUrl = ApiConfig.baseUrl;
 
-  Map<String, dynamic>? summary; // {totalProducts,totalCashiers,revenue,orders,items}
-  List<_HeatDay> heatmap = []; // [{date,count,revenue} -> model]
-  bool loadingSummary = true;
-  bool loadingHeatmap = true;
+    Map<String, dynamic>? summary; // {totalProducts,totalCashiers,revenue,orders,items}
+    Map<String, dynamic>? periodSummary; // {week:{revenue,items}, month:{...}, year:{...}}
+    List<_HeatDay> heatmap = []; // [{date,count,revenue} -> model]
+    bool loadingSummary = true;
+    bool loadingPeriodSummary = true;
+    bool loadingHeatmap = true;
 
-  List<_ActivityItem> activity = [];
-  bool loadingActivity = true;
+    List<_ActivityItem> activity = [];
+    bool loadingActivity = true;
 
   /* ================= FETCH ================= */
 
@@ -78,7 +160,7 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  Future<void> fetchSummary() async {
+    Future<void> fetchSummary() async {
     setState(() => loadingSummary = true);
     try {
       final res = await http.get(
@@ -93,7 +175,48 @@ class _DashboardPageState extends State<DashboardPage> {
     } finally {
       if (mounted) setState(() => loadingSummary = false);
     }
-  }
+    }
+
+    Future<void> fetchPeriodSummary() async {
+    setState(() => loadingPeriodSummary = true);
+    try {
+      final headers = {'Authorization': 'Bearer ${widget.token}'};
+      debugPrint('[Dashboard] baseUrl=$baseUrl');
+      final weekReq = http.get(Uri.parse('$baseUrl/reports/summary?period=week'), headers: headers);
+      final monthReq = http.get(Uri.parse('$baseUrl/reports/summary?period=month'), headers: headers);
+      final yearReq = http.get(Uri.parse('$baseUrl/reports/summary?period=year'), headers: headers);
+      final res = await Future.wait([weekReq, monthReq, yearReq]);
+
+      debugPrint('[Dashboard] period statuses week=${res[0].statusCode} month=${res[1].statusCode} year=${res[2].statusCode}');
+
+      final Map<String, dynamic> map = {};
+      if (res[0].statusCode == 200) {
+        map['week'] = jsonDecode(res[0].body) as Map<String, dynamic>;
+      } else {
+        debugPrint('[Dashboard] week error body: ${res[0].body}');
+      }
+      if (res[1].statusCode == 200) {
+        map['month'] = jsonDecode(res[1].body) as Map<String, dynamic>;
+      } else {
+        debugPrint('[Dashboard] month error body: ${res[1].body}');
+      }
+      if (res[2].statusCode == 200) {
+        map['year'] = jsonDecode(res[2].body) as Map<String, dynamic>;
+      } else {
+        debugPrint('[Dashboard] year error body: ${res[2].body}');
+      }
+      if (map.isNotEmpty) {
+        periodSummary = map;
+        debugPrint('[Dashboard] periodSummary=$periodSummary');
+      } else {
+        debugPrint('[Dashboard] no period summary data');
+      }
+    } catch (e) {
+      debugPrint('period summary error: $e');
+    } finally {
+      if (mounted) setState(() => loadingPeriodSummary = false);
+    }
+    }
 
   Future<void> fetchHeatmap() async {
     setState(() => loadingHeatmap = true);
@@ -402,14 +525,15 @@ class _DashboardPageState extends State<DashboardPage> {
 
   /* ================= LIFE CYCLE ================= */
 
-  @override
-  void initState() {
+    @override
+    void initState() {
     super.initState();
     fetchProducts();
     fetchSummary();
+    fetchPeriodSummary();
     fetchHeatmap();
     fetchActivity();
-  }
+    }
 
   @override
   void dispose() {
@@ -496,6 +620,8 @@ class _DashboardPageState extends State<DashboardPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            _PeriodKpiRow(summary: periodSummary ?? const {}, loading: loadingPeriodSummary),
+            const SizedBox(height: 16),
             _SummaryRow(loading: loadingSummary, summary: summary),
             const SizedBox(height: 16),
             Card(

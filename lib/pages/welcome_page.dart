@@ -143,6 +143,8 @@ class WelcomePage extends StatelessWidget {
                         child: const Text('Create a new account'),
                       ),
                     ),
+
+                    const SizedBox(height: 16),
                   ],
                 ),
               ),

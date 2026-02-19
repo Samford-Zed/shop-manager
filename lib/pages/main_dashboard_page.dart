@@ -40,11 +40,17 @@ class _MainDashboardPageState extends State<MainDashboardPage> {
     return fallback;
   }
 
+  void _goToTransactions() {
+    setState(() {
+      _index = 2; // Transactions tab index
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final greetingName = _nameFromToken(widget.token, widget.username);
     final views = [
-      HomeView(username: greetingName, token: widget.token),
+      HomeView(username: greetingName, token: widget.token, onViewAllActivity: _goToTransactions),
       ItemsView(token: widget.token),
       TransactionsView(token: widget.token, role: widget.role), // pass role
       SettingsView(token: widget.token, role: widget.role),
@@ -130,7 +136,8 @@ class _MainDashboardPageState extends State<MainDashboardPage> {
 class HomeView extends StatefulWidget {
   final String username;
   final String token;
-  const HomeView({super.key, required this.username, required this.token});
+  final VoidCallback? onViewAllActivity;
+  const HomeView({super.key, required this.username, required this.token, this.onViewAllActivity});
 
   @override
   State<HomeView> createState() => _HomeViewState();
@@ -139,8 +146,10 @@ class HomeView extends StatefulWidget {
 class _HomeViewState extends State<HomeView> {
   final String baseUrl = ApiConfig.baseUrl;
   Map<String, dynamic>? summary;
+  Map<String, dynamic>? periodSummary; // week/month/year -> {revenue, items}
   List<_HeatDay> heatmap = [];
   bool loadingSummary = true;
+  bool loadingPeriodSummary = true;
   bool loadingHeatmap = true;
   // NEW: activity feed state
   List<_ActivityItem> activity = [];
@@ -150,6 +159,7 @@ class _HomeViewState extends State<HomeView> {
   void initState() {
     super.initState();
     _fetchSummary();
+    _fetchPeriodSummary();
     _fetchHeatmap();
     _fetchActivity();
   }
@@ -166,6 +176,30 @@ class _HomeViewState extends State<HomeView> {
       }
     } catch (_) {}
     if (mounted) setState(() => loadingSummary = false);
+  }
+
+  Future<void> _fetchPeriodSummary() async {
+    setState(() => loadingPeriodSummary = true);
+    try {
+      final headers = {'Authorization': 'Bearer ${widget.token}'};
+      final weekReq = http.get(Uri.parse('$baseUrl/reports/summary?period=week'), headers: headers);
+      final monthReq = http.get(Uri.parse('$baseUrl/reports/summary?period=month'), headers: headers);
+      final yearReq = http.get(Uri.parse('$baseUrl/reports/summary?period=year'), headers: headers);
+      final res = await Future.wait([weekReq, monthReq, yearReq]);
+
+      final Map<String, dynamic> map = {};
+      if (res[0].statusCode == 200) {
+        map['week'] = jsonDecode(res[0].body) as Map<String, dynamic>;
+      }
+      if (res[1].statusCode == 200) {
+        map['month'] = jsonDecode(res[1].body) as Map<String, dynamic>;
+      }
+      if (res[2].statusCode == 200) {
+        map['year'] = jsonDecode(res[2].body) as Map<String, dynamic>;
+      }
+      if (map.isNotEmpty) periodSummary = map;
+    } catch (_) {}
+    if (mounted) setState(() => loadingPeriodSummary = false);
   }
 
   Future<void> _fetchHeatmap() async {
@@ -200,12 +234,21 @@ class _HomeViewState extends State<HomeView> {
 
   @override
   Widget build(BuildContext context) {
+    // Derive latest 5 sales from the full activity list (backend is newest-first)
+    final List<_ActivityItem> recentSales = activity
+        .where((it) => it.action == 'SALE_RECORD')
+        .take(5)
+        .toList();
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _SummaryRow(loading: loadingSummary, summary: summary),
+          _OverallSummaryCard(loading: loadingSummary, summary: summary),
+          const SizedBox(height: 16),
+          if (periodSummary != null)
+            _PeriodKpiRow(summary: periodSummary!, loading: loadingPeriodSummary),
           const SizedBox(height: 16),
           Card(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -222,7 +265,6 @@ class _HomeViewState extends State<HomeView> {
             ),
           ),
           const SizedBox(height: 16),
-          // NEW: Recent Activity card
           Card(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             child: Padding(
@@ -230,9 +272,24 @@ class _HomeViewState extends State<HomeView> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(children: const [Icon(Icons.track_changes), SizedBox(width: 8), Text('Recent Activity')]),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.track_changes),
+                          SizedBox(width: 8),
+                          Text('Recent Activity'),
+                        ],
+                      ),
+                      TextButton(
+                        onPressed: widget.onViewAllActivity,
+                        child: const Text('View All'),
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 12),
-                  _ActivityList(items: activity, loading: loadingActivity),
+                  _ActivityList(items: recentSales, loading: loadingActivity),
                 ],
               ),
             ),
@@ -243,7 +300,156 @@ class _HomeViewState extends State<HomeView> {
   }
 }
 
-// Helper models/widgets
+class _OverallSummaryCard extends StatelessWidget {
+  final bool loading;
+  final Map<String, dynamic>? summary;
+  const _OverallSummaryCard({required this.loading, required this.summary});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    if (loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    final s = summary ?? const {};
+    String money(num v) => v.toStringAsFixed(2);
+
+    Widget row(IconData icon, Color color, String label, String value) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            Container(
+              height: 32,
+              width: 32,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: color, size: 18),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13)),
+                  const SizedBox(height: 2),
+                  Text(
+                    value,
+                    style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            row(Icons.inventory_2, Colors.blue, 'Total Products', '${s['totalProducts'] ?? 0}'),
+            const Divider(height: 16),
+            row(Icons.badge, Colors.purple, 'Total Cashiers', '${s['totalCashiers'] ?? 0}'),
+            const Divider(height: 16),
+            row(Icons.receipt_long, Colors.teal, 'Orders', '${s['orders'] ?? 0}'),
+            const Divider(height: 16),
+            row(Icons.attach_money, Colors.green, 'Revenue', 'ETB ${money((s['revenue'] ?? 0) as num)}'),
+            const Divider(height: 16),
+            row(Icons.shopping_cart_checkout, Colors.orange, 'Items Sold', '${s['items'] ?? 0}'),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PeriodKpiRow extends StatelessWidget {
+  final Map<String, dynamic> summary;
+  final bool loading;
+  const _PeriodKpiRow({required this.summary, required this.loading});
+
+  String _money(num v) => v.toStringAsFixed(2);
+
+  Map<String, dynamic> _period(String key) {
+    final data = summary[key];
+    if (data is Map<String, dynamic>) return data;
+    return const {};
+  }
+
+  int _int(dynamic v) {
+    if (v == null) return 0;
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return 0;
+  }
+
+  num _num(dynamic v) {
+    if (v == null) return 0;
+    if (v is num) return v;
+    return 0;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final week = _period('week');
+    final month = _period('month');
+    final year = _period('year');
+
+    final items = [
+      {'label': 'Weekly Revenue', 'value': 'ETB ${_money(_num(week['revenue']))}'},
+      {'label': 'Monthly Revenue', 'value': 'ETB ${_money(_num(month['revenue']))}'},
+      {'label': 'Yearly Revenue', 'value': 'ETB ${_money(_num(year['revenue']))}'},
+      {'label': 'Weekly Items Sold', 'value': '${_int(week['items'])}'},
+      {'label': 'Monthly Items Sold', 'value': '${_int(month['items'])}'},
+      {'label': 'Yearly Items Sold', 'value': '${_int(year['items'])}'},
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Revenue Summary',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 8),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final maxW = constraints.maxWidth;
+            const gap = 10.0;
+            final twoCols = maxW >= 500;
+            final itemW = twoCols ? (maxW - gap) / 2 : maxW;
+            const itemH = 64.0;
+
+            return Wrap(
+              spacing: gap,
+              runSpacing: gap,
+              children: items.map((it) {
+                return SizedBox(
+                  width: itemW,
+                  height: itemH,
+                  child: _StatPill(
+                    icon: Icons.insights,
+                    label: it['label'] as String,
+                    value: loading ? '...' : (it['value'] as String),
+                    color: Colors.indigo,
+                  ),
+                );
+              }).toList(),
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
 class _ActivityItem {
   final int id;
   final String actorName;

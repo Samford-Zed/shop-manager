@@ -1,0 +1,14 @@
+{
+  "@@locale": "am",
+  "appTitle": "shopstack",
+  "welcomeTitle": "ወደ የሱቅ አስተዳደር እንኳን በደህና መጡ",
+  "welcomeSubtitle": "ምርቶችን ያስተዳድሩ፣ ሽያጮችን ይመዝግቡ፣ ሪፖርቶችን በአንድ ቦታ ይመልከቱ።",
+  "haveAccount": "አካውንት አለኝ",
+  "createAccount": "አዲስ አካውንት ይፍጠሩ",
+  "languageButton": "ቋንቋ",
+  "chooseLanguageTitle": "ቋንቋ ይምረጡ",
+  "featureProducts": "ምርቶች",
+  "featureSales": "ሽያጮች",
+  "featureReports": "ሪፖርቶች"
+}
+

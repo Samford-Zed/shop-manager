@@ -1,0 +1,6 @@
+# backup of previous l10n.yaml - created before removing localization generation
+arb-dir: assets/l10n
+template-arb-file: app_en.arb
+output-localization-file: app_localizations.dart
+output-class: AppLocalizations
+

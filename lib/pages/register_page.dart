@@ -1,3 +1,4 @@
+import 'dart:async' show TimeoutException;
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'dart:ui';
@@ -71,6 +72,12 @@ class _RegisterPageState extends State<RegisterPage> {
           SnackBar(content: Text('Registration failed (${response.statusCode}): ${data['message'] ?? response.body}')),
         );
       }
+    } on TimeoutException catch (_) {
+      if (!mounted) { _isSubmitting = false; return; }
+      debugPrint('Register: timeout');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Registration request timed out. Please try again.')),
+      );
     } on Exception catch (e) {
       if (!mounted) { _isSubmitting = false; return; }
       debugPrint('Register: exception=$e');

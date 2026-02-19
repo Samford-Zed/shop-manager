@@ -383,6 +383,25 @@ app.get('/sales', authMiddleware, ownerOrCashier, async (req, res) => {
 /* ================= REPORTS (OWNER) ================= */
 app.get('/reports/summary', authMiddleware, ownerOnly, async (req, res) => {
   try {
+    const { period } = req.query;
+    if (period) {
+      const allowed = { week: 'week', month: 'month', year: 'year' };
+      const trunc = allowed[String(period).toLowerCase()];
+      if (!trunc) return res.status(400).json({ message: 'Invalid period' });
+
+      const result = await pool.query(
+        `SELECT
+           COALESCE(SUM(total_price),0) AS revenue,
+           COALESCE(SUM(quantity),0) AS items
+         FROM sales
+         WHERE created_at >= date_trunc('${trunc}', NOW())`
+      );
+      return res.json({
+        revenue: parseFloat(result.rows[0].revenue || 0),
+        items: parseInt(result.rows[0].items || 0, 10),
+      });
+    }
+
     const { from, to } = req.query;
     // Default range: last 30 days
     const result = await pool.query(
